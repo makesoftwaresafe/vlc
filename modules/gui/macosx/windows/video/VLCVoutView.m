@@ -58,6 +58,7 @@
     vout_thread_t *p_vout;
     vlc_window_t *_wnd;
     dispatch_queue_t _eventQueue;
+    vlc_mutex_t _mutex;
     NSTrackingArea *_trackingArea;
     VLCPlayerController *_playerController;
     VLCHotkeysController *_hotkeysController;
@@ -71,11 +72,13 @@
 
 - (void)dealloc
 {
-    dispatch_sync(_eventQueue, ^{
-        _wnd = NULL;
-    });
-    if (p_vout)
+    vlc_mutex_lock(&_mutex);
+    _wnd = NULL;
+    vlc_mutex_unlock(&_mutex);
+
+    if (p_vout) {
         vout_Release(p_vout);
+    }
 
     [self unregisterDraggedTypes];
 }
@@ -102,7 +105,8 @@
 
     _playerController = VLCMain.sharedInstance.playlistController.playerController;
     _hotkeysController = [[VLCHotkeysController alloc] init];
-    _eventQueue = dispatch_queue_create("org.videolan.vlc.vout.mouseevents", DISPATCH_QUEUE_SERIAL);
+    _eventQueue = dispatch_queue_create("org.videolan.vlc.vout.events", DISPATCH_QUEUE_SERIAL);
+    vlc_mutex_init(&_mutex);
 }
 
 - (void)layout {
@@ -184,14 +188,15 @@
 - (void)mouseDown:(NSEvent *)o_event
 {
     if (([o_event type] == NSLeftMouseDown) && (! ([o_event modifierFlags] &  NSControlKeyMask))) {
-        if ([o_event clickCount] == 1)
-            dispatch_sync(_eventQueue, ^{
-                if (_wnd)
-                    vlc_window_ReportMousePressed(_wnd, MOUSE_BUTTON_LEFT);
-            });
-        if ([o_event clickCount] == 2)
+        if (o_event.clickCount == 1) {
+            vlc_mutex_lock(&_mutex);
+            if (_wnd) {
+                vlc_window_ReportMousePressed(_wnd, MOUSE_BUTTON_LEFT);
+            }
+            vlc_mutex_unlock(&_mutex);
+        } else if (o_event.clickCount == 2) {
             [_playerController toggleFullscreen];
-
+        }
     } else if (([o_event type] == NSRightMouseDown) ||
                (([o_event type] == NSLeftMouseDown) &&
                ([o_event modifierFlags] &  NSControlKeyMask)))
@@ -203,10 +208,11 @@
 - (void)mouseUp:(NSEvent *)event
 {
     if (event.type == NSLeftMouseUp) {
-        dispatch_sync(_eventQueue, ^{
-            if (_wnd)
-                vlc_window_ReportMouseReleased(_wnd, MOUSE_BUTTON_LEFT);
-        });
+        vlc_mutex_lock(&_mutex);
+        if (_wnd) {
+            vlc_window_ReportMouseReleased(_wnd, MOUSE_BUTTON_LEFT);
+        }
+        vlc_mutex_unlock(&_mutex);
     }
 
     [super mouseUp:event];
@@ -231,20 +237,18 @@
 
 - (void)mouseMoved:(NSEvent *)event
 {
-    NSPoint pointInView = 
-        [self convertPoint:event.locationInWindow fromView:nil];
+    const NSPoint pointInView = [self convertPoint:event.locationInWindow fromView:nil];
     if ([self mouse:pointInView inRect:self.bounds]) {
-        [NSNotificationCenter.defaultCenter postNotificationName:VLCVideoWindowShouldShowFullscreenController
-                      object:self];
+        [NSNotificationCenter.defaultCenter postNotificationName:VLCVideoWindowShouldShowFullscreenController object:self];
         // Invert Y coordinates
-        CGPoint pointInWindow = 
-            CGPointMake(pointInView.x, self.bounds.size.height - pointInView.y);
-        NSPoint pointInBacking = [self convertPointToBacking:pointInWindow];
-        dispatch_sync(_eventQueue, ^{
-            if (_wnd == NULL)
-                return;
+        const CGPoint pointInWindow = CGPointMake(pointInView.x, self.bounds.size.height - pointInView.y);
+        const NSPoint pointInBacking = [self convertPointToBacking:pointInWindow];
+
+        vlc_mutex_lock(&_mutex);
+        if (_wnd) {
             vlc_window_ReportMouseMoved(_wnd, pointInBacking.x, pointInBacking.y);
-        });
+        }
+        vlc_mutex_unlock(&_mutex);
     }
     [super mouseMoved:event];
 }
@@ -325,17 +329,19 @@
 #pragma mark -
 #pragma mark Handling of vout related actions
 
-- (void)setVoutWindow:(vlc_window_t *)p_wnd {
-    dispatch_sync(_eventQueue, ^{
-        _wnd = p_wnd;
-    });
+- (void)setVoutWindow:(vlc_window_t *)p_wnd
+{
+    vlc_mutex_lock(&_mutex);
+    _wnd = p_wnd;
+    vlc_mutex_unlock(&_mutex);
 }
 
-- (vlc_window_t *)voutWindow {
-    __block vlc_window_t *p_wnd = NULL;
-    dispatch_sync(_eventQueue, ^{
-        p_wnd = _wnd;
-    });
+- (vlc_window_t *)voutWindow
+{
+    vlc_window_t *p_wnd = NULL;
+    vlc_mutex_lock(&_mutex);
+    p_wnd = _wnd;
+    vlc_mutex_unlock(&_mutex);
     return p_wnd;
 }
 

@@ -114,6 +114,26 @@ static NSArray<VLCMediaLibraryArtist *> *fetchArtistsForLibraryItem(library_arti
     return [mutableArray copy];
 }
 
+static NSArray<NSString *> *labelsForMediaLibraryItem(const int64_t libraryID) {
+    vlc_medialibrary_t * const p_mediaLibrary = getMediaLibrary();
+    if (!p_mediaLibrary) {
+        return @[];
+    }
+
+    vlc_ml_label_list_t * const vlc_labels =
+        vlc_ml_list_media_labels(p_mediaLibrary, NULL, libraryID);
+    if (!vlc_labels) {
+        return @[];
+    }
+
+    NSMutableArray<NSString *> * const labels = NSMutableArray.array;
+    for (size_t i = 0; i < vlc_labels->i_nb_items; i++) {
+        vlc_ml_label_t * const label = &vlc_labels->p_items[i];
+        [labels addObject:toNSStr(label->psz_name)];
+    }
+    return labels.copy;
+}
+
 static NSString *genreArrayDisplayString(NSArray<VLCMediaLibraryGenre *> * const genres)
 {
     const NSUInteger genreCount = genres.count;
@@ -286,6 +306,7 @@ static NSString *genreArrayDisplayString(NSArray<VLCMediaLibraryGenre *> * const
 @property (readwrite, atomic, strong) NSString *primaryDetailString;
 @property (readwrite, atomic, strong) NSString *secondaryDetailString;
 @property (readwrite, atomic, strong) NSString *durationString;
+@property (readwrite, atomic, strong, nullable) NSArray<NSString *> *internalLabels;
 
 @end
 
@@ -329,6 +350,14 @@ static NSString *genreArrayDisplayString(NSArray<VLCMediaLibraryGenre *> * const
 - (void)iterateMediaItemsWithBlock:(nonnull void (^)(VLCMediaLibraryMediaItem * _Nonnull))mediaItemBlock
 {
     [self doesNotRecognizeSelector:_cmd];
+}
+
+- (NSArray<NSString *> *)labels
+{
+    if (self.internalLabels == nil) {
+        self.internalLabels = labelsForMediaLibraryItem(self.libraryID);
+    }
+    return self.internalLabels;
 }
 
 @end
@@ -925,6 +954,7 @@ static NSString *genreArrayDisplayString(NSArray<VLCMediaLibraryGenre *> * const
 @interface VLCMediaLibraryMediaItem ()
 
 @property (readwrite, assign) vlc_medialibrary_t *p_mediaLibrary;
+@property (readwrite, strong, atomic, nullable) NSArray<NSString *> *internalLabels;
 
 @end
 
@@ -1525,6 +1555,14 @@ static NSString *genreArrayDisplayString(NSArray<VLCMediaLibraryGenre *> * const
     [libraryController reloadMediaLibraryFoldersForInputItems:@[self.inputItem]];
 }
 
+- (NSArray<NSString *> *)labels
+{
+    if (self.internalLabels == nil) {
+        self.internalLabels = labelsForMediaLibraryItem(self.libraryID);
+    }
+    return self.internalLabels;
+}
+
 @end
 
 @implementation VLCMediaLibraryShow
@@ -1604,6 +1642,7 @@ static NSString *genreArrayDisplayString(NSArray<VLCMediaLibraryGenre *> * const
 @synthesize primaryActionableDetailLibraryItem = _primaryActionableDetailLibraryItem;
 @synthesize secondaryActionableDetail = _secondaryActionableDetail;
 @synthesize secondaryActionableDetailLibraryItem = _secondaryActionableDetailLibraryItem;
+@synthesize labels = _labels;
 
 - (instancetype)initWithDisplayString:(NSString *)displayString
               withPrimaryDetailString:(nullable NSString *)primaryDetailString
